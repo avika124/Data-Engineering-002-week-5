@@ -1,0 +1,53 @@
+import pandas as pd
+from sqlalchemy import create_engine
+import fastavro
+import os
+
+# Step 1: Connect to the database
+engine = create_engine('sqlite:///sample.db')  # Change this if using another database
+
+# Step 2: Read data from the table
+table_name = 'your_table_name'  # Replace with the actual table name
+df = pd.read_sql(f"SELECT * FROM {table_name}", engine)
+
+# Step 3: Create output directory if it doesn't exist
+os.makedirs('output', exist_ok=True)
+
+# Step 4: Export to CSV
+df.to_csv('output/data.csv', index=False)
+print("CSV file saved successfully in the output folder.")
+
+# Step 5: Export to Parquet
+df.to_parquet('output/data.parquet', compression='snappy')
+print("Parquet file saved successfully in the output folder.")
+
+# Step 6: Export to Avro
+def make_avro_schema(df):
+    """Generate an Avro schema based on the DataFrame's column types."""
+    fields = []
+    for col, dtype in df.dtypes.items():
+        if 'int' in str(dtype):
+            field_type = ["null", "long"]
+        elif 'float' in str(dtype):
+            field_type = ["null", "double"]
+        elif 'bool' in str(dtype):
+            field_type = ["null", "boolean"]
+        else:
+            field_type = ["null", "string"]
+        
+        fields.append({'name': col, 'type': field_type, 'default': None})
+    
+    return {'type': 'record', 'name': 'Data', 'fields': fields}
+
+# Build schema and prepare records
+schema = make_avro_schema(df)
+records = df.where(pd.notnull(df), None).to_dict('records')
+
+# Write to Avro file
+with open('output/data.avro', 'wb') as f:
+    fastavro.writer(f, schema, records)
+
+print("Avro file saved successfully in the output folder.")
+
+# Final confirmation
+print(f"Export complete. {len(df)} rows written to CSV, Parquet, and Avro formats.")

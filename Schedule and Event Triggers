@@ -1,0 +1,79 @@
+import schedule
+import time
+import threading
+from watchdog.observers import Observer
+from watchdog.events import FileSystemEventHandler
+
+class PipelineScheduler:
+    def __init__(self):
+        self.running = False
+        self.observers = []
+
+    # Register a task to run daily at a specific hour
+
+    def daily(self, hour, task):
+        schedule.every().day.at(f"{hour:02d}:00").do(task)
+
+    # Register a task to run once every hour
+
+    def hourly(self, task):
+        schedule.every().hour.do(task)
+
+    # Register a task to run every N minutes
+
+    def every(self, minutes, task):
+        schedule.every(minutes).minutes.do(task)
+
+    # Monitor a folder and run a task when a new file is created
+
+    def watch_folder(self, path, task):
+        class Handler(FileSystemEventHandler):
+            def on_created(self, event):
+                if not event.is_directory:
+                    task(event.src_path)
+
+        observer = Observer()
+        observer.schedule(Handler(), path)
+        observer.start()
+        self.observers.append(observer)
+
+    # Start the scheduler and all active folder watchers
+
+    def start(self):
+        self.running = True
+
+        def run():
+            while self.running:
+                schedule.run_pending()
+                time.sleep(1)
+
+        threading.Thread(target=run, daemon=True).start()
+
+    # Stop all scheduling and event monitoring
+
+    def stop(self):
+        self.running = False
+        for obs in self.observers:
+            obs.stop()
+            obs.join()
+
+
+# Initialize the pipeline scheduler
+scheduler = PipelineScheduler()
+
+# Register a task to run daily at 2 AM
+scheduler.daily(2, lambda: print("Daily export running"))
+
+# Monitor the /data directory for new files and trigger a task on each
+scheduler.watch_folder("/data", lambda f: print(f"Processing {f}"))
+
+# Start the scheduler and folder watcher in the background
+scheduler.start()
+
+# Keep the script running until interrupted
+try:
+    while True:
+        time.sleep(1)
+except KeyboardInterrupt:
+    scheduler.stop()
+    print("Scheduler stopped.")

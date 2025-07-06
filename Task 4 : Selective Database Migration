@@ -1,0 +1,68 @@
+import pandas as pd
+from sqlalchemy import create_engine, MetaData, Table
+
+class SelectiveMigrator:
+    def __init__(self, source_url, dest_url):
+        self.source = create_engine(source_url)
+        self.dest = create_engine(dest_url)
+    
+    def create_schema(self, table_name, columns):
+        """
+        Create a new table in the destination DB using only the selected columns
+        from the source table's schema.
+        """
+        metadata = MetaData()
+        metadata.reflect(bind=self.source, only=[table_name])
+        source_table = metadata.tables[table_name]
+
+        new_metadata = MetaData()
+        selected_columns = [col.copy() for col in source_table.columns if col.name in columns]
+        new_table = Table(table_name, new_metadata, *selected_columns)
+        new_metadata.create_all(self.dest)
+    
+    def copy_data(self, table_name, columns, where_clause=None):
+        """
+        Copy data for the selected columns from the source to the destination.
+        Supports optional filtering with a WHERE clause.
+        """
+        col_list = ", ".join(columns)
+        query = f"SELECT {col_list} FROM {table_name}"
+        if where_clause:
+            query += f" WHERE {where_clause}"
+        
+        df = pd.read_sql(query, self.source)
+        df.to_sql(table_name, self.dest, if_exists='append', index=False)
+        return len(df)
+    
+    def migrate_tables(self, table_config):
+        """
+        Migrate data for specific tables and columns.
+        table_config: A dictionary like {'table_name': ['col1', 'col2'], ...}
+        """
+        total_rows = 0
+
+        for table_name, columns in table_config.items():
+            try:
+                print(f"Migrating '{table_name}'...")
+                self.create_schema(table_name, columns)
+                rows = self.copy_data(table_name, columns)
+                total_rows += rows
+                print(f"Done with '{table_name}' - {rows} rows copied.")
+            except Exception as e:
+                print(f"Error copying '{table_name}': {e}")
+        
+        print(f"Migration complete. Total rows copied: {total_rows}")
+        return total_rows
+
+# Example usage
+if __name__ == "__main__":
+    migrator = SelectiveMigrator(
+        source_url="postgresql://user:pass@source/db",
+        dest_url="postgresql://user:pass@dest/db"
+    )
+
+    # Specify tables and the columns you want to migrate
+    migrator.migrate_tables({
+        'customers': ['id', 'name', 'email'],
+        'orders': ['id', 'customer_id', 'amount']
+    })
